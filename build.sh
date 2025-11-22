@@ -1,0 +1,1 @@
+lwasm -3 -d -r -lmain.list -s -orom.bin ./testrom.asm

@@ -9,9 +9,16 @@ KEY_POLL_TABLE EQU  $000A ; key matrix - 8 bytes
 KEY_ROLLOVER   EQU  $0012 ; key rollover table - 64 bytes
 SCREEN_TOP     EQU  $0052 ; screen address - 2 bytes
 SCREEN_END     EQU  $0054 ; end of screen memory - 2 bytes
+SCREEN_COLS    EQU  $0056 ; number of columns on screen - 1 byte
+SCREEN_ROWS    EQU  $0057 ; number of rows on screen - 1 byte
+SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
 
-SCREEN_COLS    EQU  40    ; number of columns on screen
-SCREEN_ROWS    EQU  25    ; number of rows on screen
+SCREEN_COLS_BAD    EQU  40    ; number of columns on screen using BAD vga
+SCREEN_ROWS_BAD    EQU  25    ; number of rows on screen using BAD vga
+BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
+BAD_CURSOR_FLASH   EQU  $5C   ; cursor flash rate for BAD vga
+SCREEN_BASE_BAD    EQU  $C000 ; base address of screen memory (bad)
+SCREEN_END_BAD     EQU  $C800 ; end address of screen memory (bad)
 
     ORG $8000
 RESET_HANDLER:
@@ -44,6 +51,7 @@ COLD_CLEAR_LOOP:
     LDX     #COLD_MESSAGE1
     JSR     PRINT_STRING
 MAIN_LOOP:
+    JSR     BLINK
     BRA     MAIN_LOOP
 
 PRINT_STRING: ; copy string from X to cursor
@@ -81,6 +89,13 @@ SCROLL_UP_LOOP:
     STA     ,Y+
     CMPY    SCREEN_END
     BNE     SCROLL_UP_LOOP
+BLANK_LINE:
+    LDA     #$20
+    LDX     #SCREEN_COLS
+BLANK_LINE_LOOP:
+    STA     ,Y+
+    LEAX    -1,X
+    BNE     BLANK_LINE_LOOP
     PULS    A,X,Y,PC ;rts
 ERROR_HANDLER:
     RTI
@@ -97,9 +112,49 @@ SWI2_HANDLER:
 SWI3_HANDLER:
     RTI
 CLS:
-    RTS
+    PSHS    A,X
+    LDX     SCREEN_TOP                  ; get screen top address
+CLS_LOOP:
+    STA     ,X+                         ; clear screen memory
+    CMPX    SCREEN_END                  ; check for end of screen
+    BNE     CLS_LOOP                    ; loop until done
+    CLR     CURSOR_COL                  ; reset cursor column
+    CLR     CURSOR_ROW                  ; reset cursor row
+    LDX     SCREEN_TOP                  ; reset cursor position
+    STX     CURSOR_POS                  ; store cursor position
+    PULS    A,X,PC ;rts
 INIT_DISPLAY:
-    RTS
+    PSHS    A,X
+    LDX     #SCREEN_BASE_BAD            ; get screen base address for BAD VGA
+    STX     SCREEN_TOP                  ; store in screen top
+    LDX     #SCREEN_END_BAD             ; get screen end address for BAD VGA
+    STX     SCREEN_END                  ; store in screen end
+    LDA     #SCREEN_COLS_BAD            ; get number of columns for BAD VGA
+    STA     SCREEN_COLS                 ; store in screen cols
+    LDA     #SCREEN_ROWS_BAD            ; get number of rows for BAD VGA
+    STA     SCREEN_ROWS                 ; store in screen rows
+    LDA     #BAD_CURSOR_CHAR            ; get cursor character for BAD VGA
+    STA     CURSOR                      ; store in cursor
+    LDA     #BAD_CURSOR_FLASH           ; get cursor blink rate for BAD VGA
+    STA     SCREEN_BLINK                ; store in screen blink counter reset
+    PULS    A,X,PC ;rts
+BLINK:
+    PSHS    A
+    DEC     CURSOR_COUNTER              ; decrement blink counter
+    BNE     NO_BLINK                    ; if not zero, skip blink processing
+    LDA     SCREEN_BLINK                ; reload blink counter
+    STA     CURSOR_COUNTER
+    LDA     [CURSOR_POS]                ; get current cursor character
+    CMPA    CURSOR                      ; compare to normal cursor char
+    BNE     BLINK_ON                    ; if not equal, turn on blink
+    LDA     CURSOR                      ; get normal cursor char
+    STA     [CURSOR_POS]                ; restore normal cursor
+    BRA     NO_BLINK                    ; done
+BLINK_ON:
+    LDA     #$20                        ; get space character
+    STA     [CURSOR_POS]                ; turn on blink (hide cursor)
+NO_BLINK:
+    PULS    A,PC ;rts
 
 WARM_CODE:
     FCN "OK"                          ; Placeholder for warm start code

@@ -22,34 +22,34 @@ SCREEN_END_BAD     EQU  $C800 ; end address of screen memory (bad)
 
     ORG $8000
 RESET_HANDLER:
-    LDX     #WARM_CODE
-    LDY     #WARM
-RESET_LOOP:
-    LDA     ,X+
-    BEQ     WARM_END
-    CMPA    ,Y+
-    BNE     COLD_START
-    BRA     RESET_LOOP
-WARM_END:
-    CMPX    #$0002
-    BNE     COLD_START
+    LDMD    #$01            ; enable 6309 native mode
+    TFR     V,X             ; expose V register for comparison
+    CMPX    #$FFFF          ; compare to default V
+    BNE     START           ; if not default, do warm start
+    LDX     $WARM_CODE      ; load warm start code
+    TFR     X,V             ; copy to V for storage
+    BRA     COLD_START      ; do cold start
 START:
-    LDA     #$20
-    JSR     CLS
-    LDX     #WARM_CODE
-    JSR     PRINT_STRING
-    BRA     MAIN_LOOP
+    LDA     #$20            ; space character
+    JSR     CLS             ; clear screen to space
+    LDX     #WARM_CODE      ; point to warm start message
+    JSR     PRINT_STRING    ; print warm start message
+    BRA     MAIN_LOOP       ; enter main loop
 COLD_START:
-    LDX     #$8000
-    LDD     #$0000
+    LDX     #$8000          ; point to end of RAM
+    LDD     #$0000          ; clear D register
 COLD_CLEAR_LOOP:
-    STD     ,--X
+    STD     ,--X            ; clear memory to zero
     BNE     COLD_CLEAR_LOOP
-    LDS     #$8000  ; set system stack pointer (enables interrupts)
-    LDU     #$7800  ; set user stack pointer
-    JSR     INIT_DISPLAY
-    LDX     #COLD_MESSAGE1
-    JSR     PRINT_STRING
+    LDS     #$8000          ; set system stack pointer (enables interrupts)
+    LDU     #$7800          ; set user stack pointer
+    JSR     INIT_DISPLAY    ; initialize display parameters
+    LDX     #COLD_MESSAGE1  ; point to cold start message 1
+    JSR     PRINT_STRING    ; print cold start message 1
+    LDX     #COLD_MESSAGE2  ; point to cold start message 2
+    JSR     PRINT_STRING    ; print cold start message 2
+    LDX     #COLD_MESSAGE3  ; point to cold start message 3
+    JSR     PRINT_STRING    ; print cold start message 3
 MAIN_LOOP:
     JSR     BLINK
     BRA     MAIN_LOOP

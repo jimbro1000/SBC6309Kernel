@@ -15,7 +15,20 @@ SCREEN_END     EQU  $0052 ; end of screen memory - 2 bytes
 SCREEN_COLS    EQU  $0054 ; number of columns on screen - 1 byte
 SCREEN_ROWS    EQU  $0055 ; number of rows on screen - 1 byte
 SCREEN_BLINK   EQU  $0056 ; screen blink counter reset - 1 byte
-; defaut constants for BAD VGA operation
+
+; *****************************************************************************
+; * interrupt vector definitions                                              *
+; *****************************************************************************
+
+ERROR_HANDLER  EQU  $0100 ; error handler vector
+NMI_HANDLER    EQU  $0103 ; NMI handler vector
+SWI_HANDLER    EQU  $0106 ; SWI handler vector
+IRQ_HANDLER    EQU  $0109 ; IRQ handler vector
+FIRQ_HANDLER   EQU  $010C ; FIRQ handler vector
+SWI2_HANDLER   EQU  $010F ; SWI2 handler vector
+SWI3_HANDLER   EQU  $0112 ; SWI3 handler vector
+
+; default constants for BAD VGA operation
 SCREEN_COLS_BAD    EQU  50    ; number of columns on screen using BAD vga
 SCREEN_ROWS_BAD    EQU  18    ; number of rows on screen using BAD vga
 BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
@@ -59,6 +72,20 @@ COLD_START:
 COLD_CLEAR_LOOP:
     STD     ,--X            ; clear memory to zero
     BNE     COLD_CLEAR_LOOP
+    LDX     #ERROR_VECTOR   ; define interrupt vectors
+    STX     ERROR_HANDLER
+    LDX     #NMI_VECTOR
+    STX     NMI_HANDLER
+    LDX     #SWI_VECTOR
+    STX     SWI_HANDLER
+    LDX     #IRQ_VECTOR
+    STX     IRQ_HANDLER
+    LDX     #FIRQ_VECTOR
+    STX     FIRQ_HANDLER
+    LDX     #SWI2_VECTOR
+    STX     SWI2_HANDLER
+    LDX     #SWI3_VECTOR
+    STX     SWI3_HANDLER
     LDS     #$8000          ; set system stack pointer (enables interrupts)
     LDU     #$7800          ; set user stack pointer
     JSR     INIT_DISPLAY    ; initialize display parameters
@@ -221,19 +248,19 @@ BLINK_ON:
 NO_BLINK:
     PULS    A,PC ;rts
 
-ERROR_HANDLER:
+ERROR_VECTOR:
     RTI
-NMI_HANDLER:
+NMI_VECTOR:
     RTI
-SWI_HANDLER:
+SWI_VECTOR:
     RTI
-IRQ_HANDLER:
+IRQ_VECTOR:
     RTI
-FIRQ_HANDLER:
+FIRQ_VECTOR:
     RTI
-SWI2_HANDLER:
+SWI2_VECTOR:
     RTI
-SWI3_HANDLER:
+SWI3_VECTOR:
     RTI
 
 WARM_CODE:
@@ -247,7 +274,7 @@ COLD_MESSAGE3:
 MSG_6309:
     FCN "6309 NOT DETECTED - HALTING" ; 6309 not detected message
 
-    ORG $FFF0
+    ORG $BFF0
 VECTOR_TABLE:
     FDB ERROR_HANDLER
     FDB SWI3_HANDLER

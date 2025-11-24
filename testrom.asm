@@ -6,6 +6,9 @@ CURSOR_COL     EQU  $0004 ; cursor column - byte
 CURSOR_ROW     EQU  $0005 ; cursor row - byte
 KEY_POLL_COUNT EQU  $0006 ; key poll counter - byte
 KEY_POLL_TABLE EQU  $0008 ; key matrix - 8 bytes
+; *****************************************************************************
+; * keyboard rollover can be reused as an input buffer for serial input
+; *****************************************************************************
 KEY_ROLLOVER   EQU  $0010 ; key rollover table - 64 bytes
 SCREEN_TOP     EQU  $0050 ; screen address - 2 bytes
 SCREEN_END     EQU  $0052 ; end of screen memory - 2 bytes
@@ -13,12 +16,14 @@ SCREEN_COLS    EQU  $0054 ; number of columns on screen - 1 byte
 SCREEN_ROWS    EQU  $0055 ; number of rows on screen - 1 byte
 SCREEN_BLINK   EQU  $0056 ; screen blink counter reset - 1 byte
 ; defaut constants for BAD VGA operation
-SCREEN_COLS_BAD    EQU  40    ; number of columns on screen using BAD vga
-SCREEN_ROWS_BAD    EQU  25    ; number of rows on screen using BAD vga
+SCREEN_COLS_BAD    EQU  50    ; number of columns on screen using BAD vga
+SCREEN_ROWS_BAD    EQU  18    ; number of rows on screen using BAD vga
 BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
 BAD_CURSOR_FLASH   EQU  $5C   ; cursor flash rate for BAD vga
-SCREEN_BASE_BAD    EQU  $C000 ; base address of screen memory (bad)
-SCREEN_END_BAD     EQU  $C800 ; end address of screen memory (bad)
+SCREEN_BASE_BAD    EQU  $E000 ; base address of screen memory (bad)
+SCREEN_END_BAD     EQU  $E800 ; end address of screen memory (bad)
+; BAD VGA needs 2K of memory for screen but has a 4K window
+; video could be upraded to 16 byte characters or to add colour support
 
     ORG $8000
 RESET_HANDLER:

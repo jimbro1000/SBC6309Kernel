@@ -1,18 +1,18 @@
-WARM           EQU  $0000 ; warm start indicator - 3 bytes
-CURSOR         EQU  $0003 ; cursor character - byte
-CURSOR_COUNTER EQU  $0004 ; blink counter - byte
-CURSOR_POS     EQU  $0005 ; cursor address - word
-CURSOR_COL     EQU  $0007 ; cursor column - byte
-CURSOR_ROW     EQU  $0008 ; cursor row - byte
-KEY_POLL_COUNT EQU  $0009 ; key poll counter - byte
-KEY_POLL_TABLE EQU  $000A ; key matrix - 8 bytes
-KEY_ROLLOVER   EQU  $0012 ; key rollover table - 64 bytes
-SCREEN_TOP     EQU  $0052 ; screen address - 2 bytes
-SCREEN_END     EQU  $0054 ; end of screen memory - 2 bytes
-SCREEN_COLS    EQU  $0056 ; number of columns on screen - 1 byte
-SCREEN_ROWS    EQU  $0057 ; number of rows on screen - 1 byte
-SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
-
+; zero page system variables
+CURSOR         EQU  $0000 ; cursor character - byte
+CURSOR_COUNTER EQU  $0001 ; blink counter - byte
+CURSOR_POS     EQU  $0002 ; cursor address - word
+CURSOR_COL     EQU  $0004 ; cursor column - byte
+CURSOR_ROW     EQU  $0005 ; cursor row - byte
+KEY_POLL_COUNT EQU  $0006 ; key poll counter - byte
+KEY_POLL_TABLE EQU  $0008 ; key matrix - 8 bytes
+KEY_ROLLOVER   EQU  $0010 ; key rollover table - 64 bytes
+SCREEN_TOP     EQU  $0050 ; screen address - 2 bytes
+SCREEN_END     EQU  $0052 ; end of screen memory - 2 bytes
+SCREEN_COLS    EQU  $0054 ; number of columns on screen - 1 byte
+SCREEN_ROWS    EQU  $0055 ; number of rows on screen - 1 byte
+SCREEN_BLINK   EQU  $0056 ; screen blink counter reset - 1 byte
+; defaut constants for BAD VGA operation
 SCREEN_COLS_BAD    EQU  40    ; number of columns on screen using BAD vga
 SCREEN_ROWS_BAD    EQU  25    ; number of rows on screen using BAD vga
 BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
@@ -30,12 +30,24 @@ RESET_HANDLER:
     LDX     $WARM_CODE      ; load warm start code
     TFR     X,V             ; copy to V for storage
     BRA     COLD_START      ; do cold start
+
+; *********************************************************************
+; * Warm start routine                                                *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 START:
     LDA     #$20            ; space character
     JSR     CLS             ; clear screen to space
     LDX     #WARM_CODE      ; point to warm start message
     JSR     PRINT_STRING    ; print warm start message
     BRA     MAIN_LOOP       ; enter main loop
+
+; *********************************************************************
+; * Cold start routine                                                *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 COLD_START:
     LDX     #$8000          ; point to end of RAM
     LDD     #$0000          ; clear D register
@@ -52,13 +64,18 @@ COLD_CLEAR_LOOP:
     LDX     #COLD_MESSAGE3  ; point to cold start message 3
     JSR     PRINT_STRING    ; print cold start message 3
 MAIN_LOOP:
-    JSR     BLINK
+    JSR     BLINK           ; handle cursor blink  
     BRA     MAIN_LOOP
 
-PRINT_STRING: ; copy string from X to cursor
+; *********************************************************************
+; * Copy null terminated string from address in X to screen at cursor *
+; * INPUT : vector to string in X                                     *
+; * OUTPUT : none                                                     *
+; *********************************************************************
+PRINT_STRING:               ; copy string from X to cursor
     PSHS    A,B,Y
-    LDY     CURSOR_POS
-    LDB     CURSOR_COL
+    LDY     CURSOR_POS      ; get current cursor address
+    LDB     CURSOR_COL      ; get current cursor column
 COPY_LOOP_LN:
     LDA     ,X+
     BEQ     COPY_DONE
@@ -79,6 +96,12 @@ NO_SCROLL:
 COPY_DONE:
     STY     CURSOR_POS 
     PULS    A,B,Y,PC ;rts
+
+; *********************************************************************
+; * Scroll screen up by one row                                       *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 SCROLL_UP: ; scroll screen up by one row
     PSHS    A,X,Y
     LDX     SCREEN_TOP
@@ -90,6 +113,12 @@ SCROLL_UP_LOOP:
     STA     ,Y+
     CMPY    SCREEN_END
     BNE     SCROLL_UP_LOOP
+
+; *********************************************************************
+; * Clear last line of screen                                         *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 BLANK_LINE:
     LDA     #$20
     LDX     #SCREEN_COLS
@@ -98,6 +127,12 @@ BLANK_LINE_LOOP:
     LEAX    -1,X
     BNE     BLANK_LINE_LOOP
     PULS    A,X,Y,PC ;rts
+
+; *********************************************************************
+; * Test if CPU is a 6309                                             *
+; * INPUT : none                                                      *
+; * OUTPUT : if 6309, return; if not, halt system                     *
+; *********************************************************************
 TEST_6309:
     PSHS    D
     FDB     $1043
@@ -118,20 +153,12 @@ HALT_6809:
     BRA     HALT_6809
 IS_6309:
     PULS    D,PC
-ERROR_HANDLER:
-    RTI
-NMI_HANDLER:
-    RTI
-SWI_HANDLER:
-    RTI
-IRQ_HANDLER:
-    RTI
-FIRQ_HANDLER:
-    RTI
-SWI2_HANDLER:
-    RTI
-SWI3_HANDLER:
-    RTI
+
+; *********************************************************************
+; * Clear screen memory and reset cursor position                     *
+; * INPUT : background character in A (typically blank space)         *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 CLS:
     PSHS    A,X
     LDX     SCREEN_TOP                  ; get screen top address
@@ -144,12 +171,18 @@ CLS_LOOP:
     LDX     SCREEN_TOP                  ; reset cursor position
     STX     CURSOR_POS                  ; store cursor position
     PULS    A,X,PC ;rts
+
+; *********************************************************************
+; * Initialize display parameters for BAD VGA                         *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 INIT_DISPLAY:
-    PSHS    A,X
-    LDX     #SCREEN_BASE_BAD            ; get screen base address for BAD VGA
-    STX     SCREEN_TOP                  ; store in screen top
-    LDX     #SCREEN_END_BAD             ; get screen end address for BAD VGA
-    STX     SCREEN_END                  ; store in screen end
+    PSHS    A,B
+    LDD     #SCREEN_BASE_BAD            ; get screen base address for BAD VGA
+    STD     SCREEN_TOP                  ; store in screen top
+    LDD     #SCREEN_END_BAD             ; get screen end address for BAD VGA
+    STD     SCREEN_END                  ; store in screen end
     LDA     #SCREEN_COLS_BAD            ; get number of columns for BAD VGA
     STA     SCREEN_COLS                 ; store in screen cols
     LDA     #SCREEN_ROWS_BAD            ; get number of rows for BAD VGA
@@ -158,7 +191,13 @@ INIT_DISPLAY:
     STA     CURSOR                      ; store in cursor
     LDA     #BAD_CURSOR_FLASH           ; get cursor blink rate for BAD VGA
     STA     SCREEN_BLINK                ; store in screen blink counter reset
-    PULS    A,X,PC ;rts
+    PULS    A,B,PC ;rts
+
+; *********************************************************************
+; * Handle cursor blink processing                                    *
+; * INPUT : none                                                      *
+; * OUTPUT : none                                                     *
+; *********************************************************************
 BLINK:
     PSHS    A
     DEC     CURSOR_COUNTER              ; decrement blink counter
@@ -176,6 +215,21 @@ BLINK_ON:
     STA     [CURSOR_POS]                ; turn on blink (hide cursor)
 NO_BLINK:
     PULS    A,PC ;rts
+
+ERROR_HANDLER:
+    RTI
+NMI_HANDLER:
+    RTI
+SWI_HANDLER:
+    RTI
+IRQ_HANDLER:
+    RTI
+FIRQ_HANDLER:
+    RTI
+SWI2_HANDLER:
+    RTI
+SWI3_HANDLER:
+    RTI
 
 WARM_CODE:
     FCN "OK"                          ; Placeholder for warm start code

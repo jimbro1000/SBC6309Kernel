@@ -22,6 +22,7 @@ SCREEN_END_BAD     EQU  $C800 ; end address of screen memory (bad)
 
     ORG $8000
 RESET_HANDLER:
+    JSR     TEST_6309       ; check the host is a 6309
     LDMD    #$01            ; enable 6309 native mode
     TFR     V,X             ; expose V register for comparison
     CMPX    #$FFFF          ; compare to default V
@@ -97,6 +98,26 @@ BLANK_LINE_LOOP:
     LEAX    -1,X
     BNE     BLANK_LINE_LOOP
     PULS    A,X,Y,PC ;rts
+TEST_6309:
+    PSHS    D
+    FDB     $1043
+    CMPB    1,S
+    BNE     IS_6309
+    LDX     #$0200
+    LDD     #$2020
+FAIL_6309_LOOP:
+    STD     ,X++
+    CMPX    #$0400
+    BNE     FAIL_6309_LOOP
+    LDX     #$0400
+    STX     CURSOR_POS
+    CLR     CURSOR_COL
+    LDX     #MSG_6309
+    JSR     PRINT_STRING
+HALT_6809:
+    BRA     HALT_6809
+IS_6309:
+    PULS    D,PC
 ERROR_HANDLER:
     RTI
 NMI_HANDLER:
@@ -164,6 +185,8 @@ COLD_MESSAGE2:
     FCN "2025 BUILD 00.00.01"         ; Version info
 COLD_MESSAGE3:
     FCN "BOOTSTRAP ONLY"              ; Additional info
+MSG_6309:
+    FCN "6309 NOT DETECTED - HALTING" ; 6309 not detected message
 
     ORG $FFF0
 VECTOR_TABLE:

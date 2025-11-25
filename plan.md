@@ -85,7 +85,7 @@ key pressed
 #### Blank Screen (A = char)
 * write supplied byte to entire screen display
 
-#### Set Cursor (A = x, B = y)
+#### Set Cursor (A = y, B = x)
 * define x,y position on screen
 
 #### Write Char (A = char)

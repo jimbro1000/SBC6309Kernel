@@ -2,8 +2,8 @@
 CURSOR         EQU  $0000 ; cursor character - byte
 CURSOR_COUNTER EQU  $0001 ; blink counter - byte
 CURSOR_POS     EQU  $0002 ; cursor address - word
-CURSOR_COL     EQU  $0004 ; cursor column - byte
-CURSOR_ROW     EQU  $0005 ; cursor row - byte
+CURSOR_ROW     EQU  $0004 ; cursor row - byte
+CURSOR_COL     EQU  $0005 ; cursor column - byte
 KEY_POLL_COUNT EQU  $0006 ; key poll counter - byte
 KEY_POLL_TABLE EQU  $0008 ; key matrix - 8 bytes
 ; *****************************************************************************
@@ -12,9 +12,10 @@ KEY_POLL_TABLE EQU  $0008 ; key matrix - 8 bytes
 KEY_ROLLOVER   EQU  $0010 ; key rollover table - 64 bytes
 SCREEN_TOP     EQU  $0050 ; screen address - 2 bytes
 SCREEN_END     EQU  $0052 ; end of screen memory - 2 bytes
-SCREEN_COLS    EQU  $0054 ; number of columns on screen - 1 byte
-SCREEN_ROWS    EQU  $0055 ; number of rows on screen - 1 byte
-SCREEN_BLINK   EQU  $0056 ; screen blink counter reset - 1 byte
+SCREEN_SIZE    EQU  $0054 ; size of screen memory - 2 bytes
+SCREEN_COLS    EQU  $0056 ; number of columns on screen - 1 byte
+SCREEN_ROWS    EQU  $0057 ; number of rows on screen - 1 byte
+SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
 
 ; *****************************************************************************
 ; * interrupt vector definitions                                              *
@@ -35,6 +36,7 @@ BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
 BAD_CURSOR_FLASH   EQU  $5C   ; cursor flash rate for BAD vga
 SCREEN_BASE_BAD    EQU  $E000 ; base address of screen memory (bad)
 SCREEN_END_BAD     EQU  $E800 ; end address of screen memory (bad)
+SCREEN_SIZE_BAD    EQU  $0800 ; size of screen memory (bad)
 ; BAD VGA needs 2K of memory for screen but has a 4K window
 ; video could be upraded to 16 byte characters or to add colour support
 
@@ -215,6 +217,8 @@ INIT_DISPLAY:
     STD     SCREEN_TOP                  ; store in screen top
     LDD     #SCREEN_END_BAD             ; get screen end address for BAD VGA
     STD     SCREEN_END                  ; store in screen end
+    LDD     #SCREEN_SIZE_BAD            ; get screen size for BAD VGA
+    STD     SCREEN_SIZE                 ; store in screen size
     LDA     #SCREEN_COLS_BAD            ; get number of columns for BAD VGA
     STA     SCREEN_COLS                 ; store in screen cols
     LDA     #SCREEN_ROWS_BAD            ; get number of rows for BAD VGA
@@ -225,6 +229,24 @@ INIT_DISPLAY:
     STA     SCREEN_BLINK                ; store in screen blink counter reset
     PULS    A,B,PC ;rts
 
+SET_DISPLAY_BASE:
+    STD     SCREEN_TOP                  ; set screen base address
+    LDX     SCREEN_SIZE                 ; get screen size
+    LEAX    D,X                         ; calculate screen end address
+    STX     SCREEN_END                  ; store screen end address
+    RTS
+SET_CURSOR:
+    PSHS    X
+    LDX     CURSOR_POS                  ; get current cursor position
+    STD     CURSOR_ROW                  ; set cursor position (row,col first)
+    PSHS    B
+    LDB     SCREEN_COLS
+    MUL                                 ; multiply row by columns
+    LEAX    D,X                         ; add offset to base address
+    PULS    B
+    ABX                                 ; add column offset
+    STX     CURSOR_POS                  ; store new cursor position
+    PULS    X,PC ;rts
 ; *********************************************************************
 ; * Handle cursor blink processing                                    *
 ; * INPUT : none                                                      *

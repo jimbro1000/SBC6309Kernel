@@ -389,7 +389,7 @@ IS_KBD_BUFFER_FULL:
     BEQ     KBD_BUFFER_FULL             ; if equal, buffer is full
 KBD_BUFFER_WRAP
     LDA     KEY_BUFF_HEAD               ; get head of buffer
-    CMPA    #KEYKEY_ROLLOVER            ; compare to start of buffer
+    CMPA    #KEY_ROLLOVER            ; compare to start of buffer
 KBD_BUFFER_FULL:
     PULS    A,PC ;rts
 

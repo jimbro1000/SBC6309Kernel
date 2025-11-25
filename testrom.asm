@@ -6,16 +6,20 @@ CURSOR_ROW     EQU  $0004 ; cursor row - byte
 CURSOR_COL     EQU  $0005 ; cursor column - byte
 KEY_POLL_COUNT EQU  $0006 ; key poll counter - byte
 KEY_POLL_TABLE EQU  $0008 ; key matrix - 8 bytes
+KEY_BUFF_HEAD  EQU  $000E ; key buffer head - byte
+KEY_BUFF_TAIL  EQU  $000F ; key buffer tail - byte
 ; *****************************************************************************
 ; * keyboard rollover can be reused as an input buffer for serial input
 ; *****************************************************************************
 KEY_ROLLOVER   EQU  $0010 ; key rollover table - 64 bytes
+KEY_ROLL_END   EQU  $004F ; end of key rollover table
 SCREEN_TOP     EQU  $0050 ; screen address - 2 bytes
 SCREEN_END     EQU  $0052 ; end of screen memory - 2 bytes
 SCREEN_SIZE    EQU  $0054 ; size of screen memory - 2 bytes
 SCREEN_COLS    EQU  $0056 ; number of columns on screen - 1 byte
 SCREEN_ROWS    EQU  $0057 ; number of rows on screen - 1 byte
 SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
+BACK_CHAR      EQU  $0059 ; background character - 1 byte
 
 ; *****************************************************************************
 ; * interrupt vector definitions                                              *
@@ -32,6 +36,7 @@ SWI3_HANDLER   EQU  $0112 ; SWI3 handler vector
 ; default constants for BAD VGA operation
 SCREEN_COLS_BAD    EQU  50    ; number of columns on screen using BAD vga
 SCREEN_ROWS_BAD    EQU  18    ; number of rows on screen using BAD vga
+BAD_BACK_CHAR      EQU  $20   ; background character for BAD vga
 BAD_CURSOR_CHAR    EQU  $7F   ; cursor character for BAD vga
 BAD_CURSOR_FLASH   EQU  $5C   ; cursor flash rate for BAD vga
 SCREEN_BASE_BAD    EQU  $E000 ; base address of screen memory (bad)
@@ -74,20 +79,28 @@ COLD_START:
 COLD_CLEAR_LOOP:
     STD     ,--X            ; clear memory to zero
     BNE     COLD_CLEAR_LOOP
+    LDA     #$0E            ; jmp opcode
     LDX     #ERROR_VECTOR   ; define interrupt vectors
-    STX     ERROR_HANDLER
+    STA     ERROR_HANDLER
+    STX     ERROR_HANDLER + 1
     LDX     #NMI_VECTOR
-    STX     NMI_HANDLER
+    STA     NMI_HANDLER
+    STX     NMI_HANDLER + 1
     LDX     #SWI_VECTOR
-    STX     SWI_HANDLER
+    STA     SWI_HANDLER
+    STX     SWI_HANDLER + 1
     LDX     #IRQ_VECTOR
-    STX     IRQ_HANDLER
+    STA     IRQ_HANDLER
+    STX     IRQ_HANDLER + 1
     LDX     #FIRQ_VECTOR
-    STX     FIRQ_HANDLER
+    STA     FIRQ_HANDLER
+    STX     FIRQ_HANDLER + 1
     LDX     #SWI2_VECTOR
-    STX     SWI2_HANDLER
+    STA     SWI2_HANDLER
+    STX     SWI2_HANDLER + 1
     LDX     #SWI3_VECTOR
-    STX     SWI3_HANDLER
+    STA     SWI3_HANDLER
+    STX     SWI3_HANDLER + 1
     LDS     #$8000          ; set system stack pointer (enables interrupts)
     LDU     #$7800          ; set user stack pointer
     JSR     INIT_DISPLAY    ; initialize display parameters
@@ -190,21 +203,28 @@ IS_6309:
 
 ; *********************************************************************
 ; * Clear screen memory and reset cursor position                     *
+; * Default version uses background character stored in BACK_CHAR     *
 ; * INPUT : background character in A (typically blank space)         *
 ; * OUTPUT : none                                                     *
 ; *********************************************************************
+DEFAULT_CLS:
+    PSHS    A
+    LDA     BACK_CHAR
+    JSR     CLS
+    PULS    A,PC ;rts
 CLS:
-    PSHS    A,X
+    PSHS    B,X
     LDX     SCREEN_TOP                  ; get screen top address
+    TFR     A,B                         ; copy background char to B
 CLS_LOOP:
-    STA     ,X+                         ; clear screen memory
+    STD     ,X++                        ; clear screen memory
     CMPX    SCREEN_END                  ; check for end of screen
     BNE     CLS_LOOP                    ; loop until done
     CLR     CURSOR_COL                  ; reset cursor column
     CLR     CURSOR_ROW                  ; reset cursor row
     LDX     SCREEN_TOP                  ; reset cursor position
     STX     CURSOR_POS                  ; store cursor position
-    PULS    A,X,PC ;rts
+    PULS    B,X,PC ;rts
 
 ; *********************************************************************
 ; * Initialize display parameters for BAD VGA                         *
@@ -227,6 +247,8 @@ INIT_DISPLAY:
     STA     CURSOR                      ; store in cursor
     LDA     #BAD_CURSOR_FLASH           ; get cursor blink rate for BAD VGA
     STA     SCREEN_BLINK                ; store in screen blink counter reset
+    LDA     #BAD_BACK_CHAR              ; get background character for BAD VGA
+    STA     BACK_CHAR                   ; store in background character
     PULS    A,B,PC ;rts
 
 SET_DISPLAY_BASE:
@@ -247,6 +269,7 @@ SET_CURSOR:
     ABX                                 ; add column offset
     STX     CURSOR_POS                  ; store new cursor position
     PULS    X,PC ;rts
+
 ; *********************************************************************
 ; * Handle cursor blink processing                                    *
 ; * INPUT : none                                                      *
@@ -268,6 +291,119 @@ BLINK_ON:
     LDA     #$20                        ; get space character
     STA     [CURSOR_POS]                ; turn on blink (hide cursor)
 NO_BLINK:
+    PULS    A,PC ;rts
+
+; *********************************************************************
+; * Receive a byte from the serial port via ACIA                      *
+; * INPUT : none                                                      *
+; * OUTPUT : received byte in A                                       *
+; *********************************************************************
+
+DO_SERIAL_IN: 
+	PSHS    CC,B			            ; save registers
+    ORCC    #IntsDisable		        ; disable interrrupts
+    LDA     #AciaSRxFull		        ; check for receiver register full (below)    
+	LDB     AciaCmd			            ; get command register
+    ORB     #AciaDTR		            ; set DTR low
+    STB     AciaCmd			            ; send it
+    ANDB    #~AciaDTR		            ; set DTR bit high again
+	
+GET_SERIAL_CHAR:
+    BITA    AciaStat		            ; test status of ACIA
+    BEQ     GET_SERIAL_CHAR	            ; no data, keep waiting
+    STB     AciaCmd			            ; set DTR high again
+    LDA     AciaData		            ; get the received data	
+    PULS    CC,B,PC		                ; restore and return
+
+; *********************************************************************
+; * Check if data is available from serial port via ACIA              *
+; * INPUT : none                                                      *
+; * OUTPUT : if data available, Z clear                               *
+; *          if no data, Z set                                        *
+; *********************************************************************
+
+CHECK_SERIAL_IN:
+    BITA    AciaStat		            ; test status of ACIA
+    RTS         		                ; restore and return
+
+; *********************************************************************
+; * Transmit a byte to the serial port via ACIA                       *
+; * INPUT : byte to transmit in A                                     *
+; * OUTPUT : none                                                     *
+; *********************************************************************
+
+DO_SERIAL_OUT:
+	PSHS    CC,B			            ; save regs
+    LDB     #AciaSTxEmpty		        ; check for space in transmit register
+PUT_SERIAL_CHAR:
+    BITB    AciaStat		            ; is there space?
+    BEQ     PUT_SERIAL_CHAR			    ; nop, loop until current byte transmitted
+    STA     AciaData		            ; write data to be transmitted	
+    PULS    CC,B,PC			            ; restore and return
+
+DO_SET_BAUD:
+	CMPB    #$07			            ; check for a valid board rate number
+    BCC     SET_BAUD_ERR			    ; error, exit
+	
+    LDX     #BAUD_RATE_TABLE		    ; point to base of baud rate table
+    ABX				                    ; move to correct entry
+    LDB     TextSerBaudRate 	        ; get the baud rate to set
+    ANDB    #~AciaBrdMask		        ; mask out baud rate bits
+    ORB     ,X			                ; merge with rate from table
+    STB     TextSerBaudRate 	        ; set the baud rate	
+    ANDCC   #~FlagCarry		            ; clear carry
+    BRA     SET_BAUD_END		        ; return
+	
+SET_BAUD_ERR:
+    COMB				                ; flag error
+SET_BAUD_END:
+    RTS
+
+; baud rate table, see 6551 datasheet for details.
+;
+; Note the 6551 is capable of other baud rates if programmed 
+; directly
+;
+BAUD_RATE_TABLE:   
+    FCB     AciaCBrd300	    ; 300
+    FCB     AciaCBrd600	    ; 600
+    FCB     AciaCBrd1200	; 1200
+    FCB     AciaCBrd2400	; 2400
+    FCB     AciaCBrd4800	; 4800
+    FCB     AciaCBrd9600	; 9600
+    FCB     AciaCBrd19200	; 19200
+
+; *********************************************************************
+; * Check if keyboard buffer is full                                  *
+; * INPUT : none                                                      *
+; * OUTPUT : if full, Z set                                           *
+; *          if not full, Z clear                                     *
+; *********************************************************************
+IS_KBD_BUFFER_FULL:
+    PSHS    A
+    LDA     KEY_BUFF_TAIL               ; get tail of buffer
+    CMPA    #KEY_ROLL_END               ; compare to end of buffer
+    BEQ     KBD_BUFFER_WRAP             ; if at end, wrap to start
+    SUBA    KEY_BUFF_HEAD               ; tail - head
+    CMPA    #$FF                        ; compare to -1
+    BEQ     KBD_BUFFER_FULL             ; if equal, buffer is full
+KBD_BUFFER_WRAP
+    LDA     KEY_BUFF_HEAD               ; get head of buffer
+    CMPA    #KEYKEY_ROLLOVER            ; compare to start of buffer
+KBD_BUFFER_FULL:
+    PULS    A,PC ;rts
+
+; *********************************************************************
+; * Check if keyboard buffer is empty                                 *
+; * INPUT : none                                                      *
+; * OUTPUT : if empty, Z set                                         *
+; *          if not empty, Z clear                                   *
+; *********************************************************************
+
+IS_KBD_BUFFER_EMPTY:
+    PSHS    A
+    LDA     KEY_BUFF_HEAD               ; get head of buffer
+    CMPA    KEY_BUFF_TAIL               ; compare to end of buffer
     PULS    A,PC ;rts
 
 ERROR_VECTOR:
@@ -306,3 +442,89 @@ VECTOR_TABLE:
     FDB SWI_HANDLER
     FDB NMI_HANDLER
     FDB RESET_HANDLER
+
+; bitmasks for flags
+FlagCarry		EQU		$01
+FlagOverflow	EQU		$02
+FlagZero		EQU		$04
+FlagNegative	EQU		$08
+FlagIRQ			EQU		$10
+FlagHlafCarry	EQU		$20
+FlagFIRQ		EQU		$40
+FlagEntire		EQU		$80
+
+; ANDCC with IntsEnable to enable IRQ + FIRQ
+; ORCC with IntsDisable to disable IRQ + FIRQ
+
+IntsEnable		EQU		~(FlagFIRQ+FlagIRQ)
+IntsDisable		EQU		(FlagFIRQ+FlagIRQ)		
+
+ACIA_BASE	    EQU		$FF00		; base address for ACIA
+RegAciaData	    EQU		$04		; Acia Rx/Tx Register
+RegAciaStat	    EQU		$05		; Acia status register
+RegAciaCmd	    EQU		$06		; Acia command register
+RegAciaCtrl	    EQU		$07		; Acia control register
+
+AciaData	    EQU		RegAciaData+ACIA_BASE	; Acia Rx/Tx Register
+AciaStat	    EQU		RegAciaStat+ACIA_BASE	; Acia status register
+AciaCmd		    EQU		RegAciaCmd+ACIA_BASE	; Acia command register
+AciaCtrl	    EQU		RegAciaCtrl+ACIA_BASE	; Acia control register
+
+; constants for the ACIA status register
+
+AciaSParityErr	EQU		$01		; parity error
+AciaSFrameErr	EQU		$02		; framing error
+AciaSOverrun	EQU		$04		; data overrun
+AciaSRxFull	EQU		$08		; receiver register full
+AciaSTxEmpty	EQU		$10		; transmit register empty
+AciaSDCD	EQU		$20		; data carrier detect =0detect, 1=not detect
+AciaSDSR	EQU		$40		; data set ready 0=ready, 1=not ready
+AciaSIRQ	EQU		$80		; interrupt, 0=no int, 1=int
+
+; constants for ACIA command register
+AciaPMCMask	EQU		$C0		; mask for PMC bits
+AciaTICMask	EQU		$0C		; transmitter interrupt control mask
+
+AciaPMCPOdd	EQU		$00		; odd parity tx/rx
+AciaPMCPEven	EQU		$40		; even parity tx/rx
+AciaPMCPMark	EQU		$80		; mark parity tx, rx parity disabled
+AciaPMCPSpace	EQU		$C0		; space parity tx, rx parity disabled
+AciaPME		EQU		$20		; parity mode enable = 1, disable = 0
+AciaREM		EQU		$10		; receiver echo mode, 0=no echo, 1=echo
+AcidTICRHDis	EQU		$00		; RTS high, interrupt disabled
+AcidTICRLEna	EQU		$04		; RTS low, interrupt enabled
+AcidTICRLDis	EQU		$08		; RTS low, interrupt disabled
+AcidTICRLBrk	EQU		$0C		; RTS low, interrupt disabled, break on txd
+AciaIRD		EQU		$02		; receiver interrupt disable, 0=int enabled, 1=int disabled
+AciaDTR		EQU		$01		; data terminal ready 0=DTR high, 1=DTR low
+
+; constants for the ACIA control register 
+; bits 0..3 specify the baud rate
+
+AciaBrdMask	EQU		$0F		; baud rate mask
+AciaCBrdExt	EQU		$00		; 1/16th external clock
+AciaCBrd50	EQU		$01		; 50 baud
+AciaCBrd75	EQU		$02		; 75 baud
+AciaCBrd110	EQU		$03		; 110 baud
+AciaCBrd135	EQU		$04		; 135 baud
+AciaCBrd150	EQU		$05		; 150 baud
+AciaCBrd300	EQU		$06		; 300 baud
+AciaCBrd600	EQU		$07		; 600 baud
+AciaCBrd1200	EQU		$08		; 1200 baud
+AciaCBrd1800	EQU		$09		; 1800 baud
+AciaCBrd2400	EQU		$0A		; 2400 baud
+AciaCBrd3600	EQU		$0B		; 3600 baud
+AciaCBrd4800	EQU		$0C		; 4800 baud
+AciaCBrd7200	EQU		$0D		; 7200 baud
+AciaCBrd9600	EQU		$0E		; 9600 baud
+AciaCBrd19200	EQU		$0E		; 19200 baud
+
+AciaCRxClk	EQU		$10		; receiver clock source, 0= external, 1=baud rate
+AciaWrdMask	EQU		$60		; word length bits mask
+AciaCWrd8	EQU		$00		; 8 bit word
+AciaCWrd7	EQU		$20		; 7 bit word
+AciaCWrd6	EQU		$40		; 6 bit word
+AciaCWrd5	EQU		$60		; 5 bit word3
+AciaCSBN	EQU		$80		; stop bit number, 0=1 bit, 1=2 bits
+
+TextSerBaudRate	EQU	AciaCtrl	; Serial baud rate

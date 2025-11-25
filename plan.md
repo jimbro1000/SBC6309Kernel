@@ -36,6 +36,7 @@ need timed interrupt cycle to trigger keyboard polling cycle
 * Display API
 * File API
 * Comms API
+* Monitor
 
 ### Keyboard
 * get next key pressed ()(A)
@@ -66,6 +67,7 @@ key pressed
 * write string (D) - write null terminated string at D to screen at cursor position
 * blank screen (A) - set screen to character A
 * scroll (A) - scroll A lines
+* putcr () - newline
 
 #### Init Display
 * define screen registers (base address, mode)

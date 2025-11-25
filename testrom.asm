@@ -502,26 +502,11 @@ VECTOR_TABLE:
     FDB NMI_HANDLER
     FDB RESET_HANDLER
 
-; bitmasks for flags
-FlagCarry		EQU		$01
-FlagOverflow	EQU		$02
-FlagZero		EQU		$04
-FlagNegative	EQU		$08
-FlagIRQ			EQU		$10
-FlagHlafCarry	EQU		$20
-FlagFIRQ		EQU		$40
-FlagEntire		EQU		$80
-
 ; ANDCC with IntsEnable to enable IRQ + FIRQ
 ; ORCC with IntsDisable to disable IRQ + FIRQ
 
 IntsEnable		EQU		~(FlagFIRQ+FlagIRQ)
 IntsDisable		EQU		(FlagFIRQ+FlagIRQ)		
-
-RegAciaData	    EQU		$04		; Acia Rx/Tx Register
-RegAciaStat	    EQU		$05		; Acia status register
-RegAciaCmd	    EQU		$06		; Acia command register
-RegAciaCtrl	    EQU		$07		; Acia control register
 
 AciaData	    EQU		RegAciaData+ACIA_BASE	; Acia Rx/Tx Register
 AciaStat	    EQU		RegAciaStat+ACIA_BASE	; Acia status register

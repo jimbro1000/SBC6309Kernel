@@ -56,3 +56,8 @@ AciaCWrd5	EQU		$60		; 5 bit word3
 AciaCSBN	EQU		$80		; stop bit number, 0=1 bit, 1=2 bits
 
 TextSerBaudRate	EQU	AciaCtrl	; Serial baud rate
+
+RegAciaData	    EQU		$04		; Acia Rx/Tx Register
+RegAciaStat	    EQU		$05		; Acia status register
+RegAciaCmd	    EQU		$06		; Acia command register
+RegAciaCtrl	    EQU		$07		; Acia control register

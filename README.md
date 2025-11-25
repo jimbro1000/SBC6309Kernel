@@ -37,3 +37,14 @@ lazy)
 
 If I get organised a build container will be created so that I
 can run the build process on any hardware...
+
+## Borrowing a Monitor ##
+
+A comparable 6309 SBC homebrew project by tomcircuit contains
+a translation of wozmon to 6309 assembler. The hardware
+implementation may be different but the fundamental code is
+transferable, so rather than re-invent the wheel I have borrowed
+it with some artistic licence
+
+[tomcircuit/hd6309sbc](https://github.com/tomcircuit/hd6309sbc)
+

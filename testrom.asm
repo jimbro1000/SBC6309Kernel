@@ -105,13 +105,29 @@ COLD_CLEAR_LOOP:
     JSR     PRINT_STRING    ; print cold start message 2
     LDX     #COLD_MESSAGE3  ; point to cold start message 3
     JSR     PRINT_STRING    ; print cold start message 3
+
+; *********************************************************************
+; * Main processing loop                                              *
+; * 1. Blink cursor on "counter"                                      *
+; * 2. Check for serial input                                         *
+; * 3. If serial input, get data until stream empty or buffer full    *
+; * 4. Pull a line of input from buffer or until empty                *
+; * 5. Echo line to screen at cursor position                         *
+; * 6. On end of line pass to monitor to parse command                * 
+; * 7. Repeat                                                         * 
+; *********************************************************************
 MAIN_LOOP:
-    JSR     BLINK           ; handle cursor blink  
-    JSR     CHECK_SERIAL_IN ; check for serial input
-    BEQ     NO_SERIAL_IN    ; if no data, skip
-    JSR     DO_SERIAL_IN    ; get serial data
+    JSR     BLINK           ; handle cursor blink
+DRAIN_SERIAL:
+    JSR     IS_KBD_BUFFER_FULL  ; check if keyboard buffer is full  
+    BEQ     FORCE_MON           ; if full, skip forcing serial input
+    JSR     CHECK_SERIAL_IN     ; check for serial input
+    BEQ     FORCE_MON           ; if no data, skip
+    JSR     DO_SERIAL_IN        ; get serial data
     JSR     PUSH_KEYBOARD_BUFFER ; push character into keyboard buffer
-NO_SERIAL_IN:
+    BRA     DRAIN_SERIAL        ; repeat until no more data
+FORCE_MON:
+    JSR     MONITOR             ; monitor drain buffer and process commands if complete
     BRA     MAIN_LOOP
 
 ; *********************************************************************
@@ -143,6 +159,28 @@ NO_SCROLL:
 COPY_DONE:
     STY     CURSOR_POS 
     PULS    A,B,Y,PC ;rts
+
+PRINT_CHAR:
+    PSHS    A,X
+    LDX     CURSOR_POS
+    STA     ,X+
+    LDA     CURSOR_COL
+    CMPA    #SCREEN_COLS
+    BNE     NO_SCROLL_CHAR
+    CLR     CURSOR_COL
+    LDA     CURSOR_ROW
+    INCA
+    CMPA    #SCREEN_ROWS
+    BNE     NO_SCROLL_CHAR
+    DECA
+    STA     CURSOR_ROW
+    LDA     #SCREEN_COLS
+    NEGA
+    LEAX    A,X
+    JSR     SCROLL_UP
+NO_SCROLL_CHAR:
+    STX     CURSOR_POS
+    PULS    A,X,PC ;rts
 
 PUT_CR:
     PSHS    A,B,Y
@@ -407,7 +445,7 @@ IS_KBD_BUFFER_FULL:
     BEQ     KBD_BUFFER_FULL             ; if equal, buffer is full
 KBD_BUFFER_WRAP
     LDA     KEY_BUFF_HEAD               ; get head of buffer
-    CMPA    #KEY_ROLLOVER            ; compare to start of buffer
+    CMPA    #KEY_ROLLOVER               ; compare to start of buffer
 KBD_BUFFER_FULL:
     PULS    A,PC ;rts
 
@@ -432,9 +470,7 @@ IS_KBD_BUFFER_EMPTY:
 
 PUSH_KEYBOARD_BUFFER:
     PSHS    X
-    JSR     IS_KBD_BUFFER_FULL
     LDX     KEY_BUFF_HEAD               ; get head of buffer
-    BEQ     PUSH_KBD_BUFF_END           ; if not full, proceed
     STA     ,X+                         ; store character in buffer
     CMPX    #KEY_ROLL_END               ; check for end of buffer
     BNE     PUSH_KBD_BUFF_END           ; if not end, done
@@ -464,6 +500,43 @@ POP_KBD_BUFF_END:
     PULS    X,PC ;rts    
 
 MONITOR:
+; drain keyboard buffer or until CR found
+    JSR     POP_KEYBOARD_BUFFER
+    CMPA    #$0D            ; check for carriage return
+    BEQ     MONITOR_LINE_COMPLETE
+    CMPA    #CTL_H          ; check for backspace
+    BEQ     MONITOR_BACKSPACE
+    CMPA    #DEL            ; delete
+    BEQ     MONITOR_BACKSPACE
+    CMPA    #CTL_X          ; check for cancel
+    BEQ     MONITOR_CANCEL
+    CMPA    #ESC            ; check for escape
+    BEQ     MONITOR_CANCEL
+    JSR     PRINT_CHAR      ; echo character to screen
+    PSHU    A               ; add character to command buffer
+    JSR     IS_KBD_BUFFER_EMPTY
+    BEQ     MONITOR_PAUSE   ; if empty, return to main loop
+    BRA     MONITOR         ; else keep draining
+MONITOR_CANCEL:
+    LDA     #'\'
+    JSR     PRINT_CHAR      ; print '\' for cancel
+    JSR     PUT_CR          ; print carriage return
+    BRA     MONITOR
+MONITOR_BACKSPACE:
+    LDB     CURSOR_COL      ; get current cursor column
+    BEQ     MONITOR_SOL     ; if at column 0, ignore backspace
+    DECB
+    LDA     BACK_CHAR       ; get background character
+    PULU    A               ; remove last character from command buffer
+    JSR     PRINT_CHAR      ; print background character
+MONITOR_SOL:
+    BRA     MONITOR         ; continue draining
+MONITOR_PAUSE:
+    RTS
+MONITOR_LINE_COMPLETE:
+    JSR     PUT_CR          ; print carriage return
+    ; U contains command buffer in reverse order
+    ; MONITOR_PARSE
     RTS
 ERROR_VECTOR:
     RTI
@@ -512,3 +585,10 @@ AciaData	    EQU		RegAciaData+ACIA_BASE	; Acia Rx/Tx Register
 AciaStat	    EQU		RegAciaStat+ACIA_BASE	; Acia status register
 AciaCmd		    EQU		RegAciaCmd+ACIA_BASE	; Acia command register
 AciaCtrl	    EQU		RegAciaCtrl+ACIA_BASE	; Acia control register
+
+CTL_C    EQU      'C'-$40                           ; control-C
+CTL_S    EQU      'S'-$40                           ; control-S
+CTL_H    EQU      'H'-$40                           ; control-H
+CTL_X    EQU      'X'-$40                           ; control-X
+DEL      EQU      127                               ; "Delete"
+ESC      EQU      '['-$40                           ; ESCape

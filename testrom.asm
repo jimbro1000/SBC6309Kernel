@@ -23,6 +23,8 @@ SCREEN_COLS    EQU  $0056 ; number of columns on screen - 1 byte
 SCREEN_ROWS    EQU  $0057 ; number of rows on screen - 1 byte
 SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
 BACK_CHAR      EQU  $0059 ; background character - 1 byte
+dMODE          EQU  $005A ; monitor mode - 1 byte
+dTEMP          EQU  $005B ; monitor temp - 1 byte
 
 ; *****************************************************************************
 ; * interrupt vector definitions                                              *
@@ -96,8 +98,8 @@ COLD_CLEAR_LOOP:
     LDX     #SWI3_VECTOR
     STA     SWI3_HANDLER
     STX     SWI3_HANDLER + 1
-    LDS     #$8000          ; set system stack pointer (enables interrupts)
-    LDU     #$7800          ; set user stack pointer
+    LDU     #$8000          ; set user stack pointer
+    LDS     #$7F80          ; set system stack pointer (enables interrupts)
     JSR     INIT_DISPLAY    ; initialize display parameters
     LDX     #COLD_MESSAGE1  ; point to cold start message 1
     JSR     PRINT_STRING    ; print cold start message 1
@@ -118,7 +120,6 @@ COLD_CLEAR_LOOP:
 ; *********************************************************************
 MAIN_START:
     CLRB                        ; clear command char index   
-    TFR     U,Y                 ; set command buffer to grow up from U
 MAIN_LOOP:
     JSR     BLINK               ; handle cursor blink
 DRAIN_SERIAL:
@@ -533,7 +534,7 @@ MONITOR:
     CMPA    #ESC            ; check for escape
     BEQ     MONITOR_CANCEL
     JSR     PRINT_CHAR      ; echo character to screen
-    STA     B,Y             ; increment cursor column
+    STA     B,U             ; increment cursor column
     INCB
     JSR     IS_KBD_BUFFER_EMPTY
     BEQ     MONITOR_PAUSE   ; if empty, return to main loop
@@ -553,7 +554,7 @@ MONITOR_SOL:
 MONITOR_PAUSE:
     RTS
 MONITOR_LINE_COMPLETE:
-    STA     B,Y             ; store command length
+    STA     B,U             ; store command length
     JSR     PUT_CR          ; print carriage return
     ; Y points to command buffer 
     CLRD
@@ -563,7 +564,7 @@ MON_SETMODE:
 MON_BLSKIP:
     INCB                    ; advance command index
 MON_NEXT_ITEM:
-    LDA     B,Y             ; get next command character
+    LDA     B,U             ; get next command character
     CMPA    #CR             ; check for end of command
     BEQ     MON_XRET        ; if end, execute command
     CMPA    #DOT            ; check for period
@@ -578,7 +579,7 @@ MON_NEWHEX:
     CLRW
     STB     dTEMP
 MON_NEXTHEX:
-    LDA     B,Y             ; get next command character
+    LDA     B,U             ; get next command character
     EORA    #$30            ; convert digits to value
     CMPA    #$09            ; check for non-digit
     BLS     MON_ADDDIGIT    ; if digit, add to value

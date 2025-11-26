@@ -116,8 +116,11 @@ COLD_CLEAR_LOOP:
 ; * 6. On end of line pass to monitor to parse command                * 
 ; * 7. Repeat                                                         * 
 ; *********************************************************************
+MAIN_START:
+    CLRB                        ; clear command char index   
+    TFR     U,Y                 ; set command buffer to grow up from U
 MAIN_LOOP:
-    JSR     BLINK           ; handle cursor blink
+    JSR     BLINK               ; handle cursor blink
 DRAIN_SERIAL:
     JSR     IS_KBD_BUFFER_FULL  ; check if keyboard buffer is full  
     BEQ     FORCE_MON           ; if full, skip forcing serial input
@@ -180,6 +183,23 @@ PRINT_CHAR:
     JSR     SCROLL_UP
 NO_SCROLL_CHAR:
     STX     CURSOR_POS
+    PULS    A,X,PC ;rts
+
+BACKSPACE:
+    PSHS    A,X
+    LDX     CURSOR_POS
+    CMPX    SCREEN_TOP
+    BEQ     NO_BACKSPACE
+    LDA     CURSOR_COL
+    TSTA
+    BNE     PRINT_BACKSPACE
+    DEC     CURSOR_ROW
+    LDA     SCREEN_COLS
+PRINT_BACKSPACE:
+    DECA
+    STA     CURSOR_COL
+    LDA     BACK_CHAR
+    STA     ,-X
     PULS    A,X,PC ;rts
 
 PUT_CR:
@@ -513,7 +533,8 @@ MONITOR:
     CMPA    #ESC            ; check for escape
     BEQ     MONITOR_CANCEL
     JSR     PRINT_CHAR      ; echo character to screen
-    PSHU    A               ; add character to command buffer
+    STA     B,Y             ; increment cursor column
+    INCB
     JSR     IS_KBD_BUFFER_EMPTY
     BEQ     MONITOR_PAUSE   ; if empty, return to main loop
     BRA     MONITOR         ; else keep draining
@@ -523,20 +544,59 @@ MONITOR_CANCEL:
     JSR     PUT_CR          ; print carriage return
     BRA     MONITOR
 MONITOR_BACKSPACE:
-    LDB     CURSOR_COL      ; get current cursor column
-    BEQ     MONITOR_SOL     ; if at column 0, ignore backspace
+    TSTB                    ; check command length
+    BEQ     MONITOR_SOL     ; if at char 0, ignore backspace
+    JSR     BACKSPACE       ; do backspace on screen
     DECB
-    LDA     BACK_CHAR       ; get background character
-    PULU    A               ; remove last character from command buffer
-    JSR     PRINT_CHAR      ; print background character
 MONITOR_SOL:
     BRA     MONITOR         ; continue draining
 MONITOR_PAUSE:
     RTS
 MONITOR_LINE_COMPLETE:
+    STA     B,Y             ; store command length
     JSR     PUT_CR          ; print carriage return
-    ; U contains command buffer in reverse order
-    ; MONITOR_PARSE
+    ; Y points to command buffer 
+    CLRD
+    DECB
+MON_SETMODE:
+    STA     dMODE           ; $00=XAM (0), $BA=STORE (-), $2E=BLOK XAM (+)
+MON_BLSKIP:
+    INCB                    ; advance command index
+MON_NEXT_ITEM:
+    LDA     B,Y             ; get next command character
+    CMPA    #CR             ; check for end of command
+    BEQ     MON_XRET        ; if end, execute command
+    CMPA    #DOT            ; check for period
+    BEQ     MON_SETMODE     ; if period, set block mode
+    BLS     MON_BLSKIP      ; delimiters
+    ORA     #$80            ; convert high-bit set
+    CMPA    #HI_COL         ; check for colon
+    BEQ     MON_SETMODE     ; set store mode
+    CMPA    #HI_X           ; check for X
+    BEQ     MON_XLOAD       ; load hexfile from console
+MON_NEWHEX:
+    CLRW
+    STB     dTEMP
+MON_NEXTHEX:
+    LDA     B,Y             ; get next command character
+    EORA    #$30            ; convert digits to value
+    CMPA    #$09            ; check for non-digit
+    BLS     MON_ADDDIGIT    ; if digit, add to value
+    ORA     #$20            ; neutralize case
+    ADDA    #$89            ; convert A-F to $FA-$FF
+    CMPA    #$F9            ; check for non-hex
+    BLS     MON_NOTHEX      ; if hex, continue
+MON_ADDDIGIT:
+    ANDA    #$0F            ; mask to 4 bits
+    EXG     D,W             ; digit in 4lsb of E, WORD in D, buffer ptr in F
+    ASLD                    ; shift left 4 bits
+    ASLD
+    ASLD
+    ASLD
+    ORR     E,B             ; OR the new digit in WORD
+    EXG     D,W             ; restore registers
+    INCB                    ; advance command index
+    BRA     MON_NEXTHEX     ; get next hex digit
     RTS
 ERROR_VECTOR:
     RTI

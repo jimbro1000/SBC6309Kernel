@@ -5,7 +5,7 @@
 ; * $A000 - $BFFF = rom page 2 8K
 ; * $C000 - $DFFF = reserved 4K
 ; * $E000 - $EFFF = video 4K
-; * $F000 - $FDFF = monitor
+; * $F000 - $FDFF = monitor (3.5K)
 ; * $FE00 - $FFEF = IO
 ; * $FFF0 - $FFFF = CPU vectors
 ; ***************************************************************

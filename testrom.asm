@@ -1,6 +1,33 @@
     include "config.inc"
     include "cpu.inc"
     include "acia.inc"
+
+; *****************************************************************************
+; * 6309 test ROM - intended to run on the SBC6309 with BAD VGA card          *
+; * Author : Julian Brown                                                     *
+; * Date : 2024-06-01                                                         *
+; * This code leans heavily on prior work by Jeff Tranter                     *
+; * This ROM performs the following functions:                                *
+; * 1. On reset, check if CPU is a 6309 and halt if not                       *
+; * 2. If 6309, check if warm start code is present and if so, do warm start  *
+; *    else do cold start                                                     *
+; * 3. On warm start, clear screen and print warm start message               *
+; *    on cold, initialise system, clear screen, print cold start message     *
+; * 4. Enter main loop to handle keyboard input and monitor commands          *
+; * 5. Handle cursor blinking in main loop                                    *
+; * 6. Handle serial input from ACIA in main loop                             *
+; * 7. Monitor supports simple command parsing with support for setting       *
+; *    display mode and loading hex files from serial input                   *
+; * 8. Monitor commands are entered at the prompt and processed when the      *
+; *    user presses enter                                                     *
+; * 9. Monitor command format is loosely based on wozmon with support for hex *
+; *    file loading, display mode setting, and command cancellation           *
+; * 10. Monitor command parsing is incomplete and can be extended with        *
+; *     additional commands as needed                                         *
+; * 11. The ROM is intended for testing and demonstration purposes and is     *
+; *     not a full implementation of a monitor or operating system            *
+; *****************************************************************************
+
 ; zero page system variables
 CURSOR         EQU  $0000 ; cursor character - byte
 CURSOR_COUNTER EQU  $0001 ; blink counter - byte
@@ -389,7 +416,8 @@ GET_SERIAL_CHAR:
     BITA    AciaStat		            ; test status of ACIA
     BEQ     GET_SERIAL_CHAR	            ; no data, keep waiting
     STB     AciaCmd			            ; set DTR high again
-    LDA     AciaData		            ; get the received data	
+    LDA     AciaData		            ; get the received data	from Acia Rx/Tx Register
+    ANDCC   #IntsEnable		            ; re-enable interrupts
     PULS    CC,B,PC		                ; restore and return
 
 ; *********************************************************************
@@ -442,13 +470,13 @@ SET_BAUD_END:
 ; directly
 ;
 BAUD_RATE_TABLE:   
-    FCB     AciaCBrd300	    ; 300
-    FCB     AciaCBrd600	    ; 600
-    FCB     AciaCBrd1200	; 1200
-    FCB     AciaCBrd2400	; 2400
-    FCB     AciaCBrd4800	; 4800
-    FCB     AciaCBrd9600	; 9600
-    FCB     AciaCBrd19200	; 19200
+    FCB     AciaCBrd300	    ; 300 baud
+    FCB     AciaCBrd600	    ; 600 baud
+    FCB     AciaCBrd1200	; 1200 baud
+    FCB     AciaCBrd2400	; 2400 baud
+    FCB     AciaCBrd4800	; 4800 baud
+    FCB     AciaCBrd9600	; 9600 baud
+    FCB     AciaCBrd19200	; 19200 baud
 
 ; *********************************************************************
 ; * Check if keyboard buffer is full                                  *
@@ -519,6 +547,11 @@ POP_KEYBOARD_BUFFER:
 POP_KBD_BUFF_END:
     STX     KEY_BUFF_TAIL               ; store updated tail pointer
     PULS    X,PC ;rts    
+
+; **************************************************************
+; * Monitor loosly based on wozmon translated to 6809 assembly *
+; * Implementation is incomplete....
+; **************************************************************
 
 MONITOR:
 ; drain keyboard buffer or until CR found
@@ -599,6 +632,7 @@ MON_ADDDIGIT:
     INCB                    ; advance command index
     BRA     MON_NEXTHEX     ; get next hex digit
     RTS
+
 ERROR_VECTOR:
     RTI
 NMI_VECTOR:
@@ -639,7 +673,7 @@ VECTOR_TABLE:
 ; ANDCC with IntsEnable to enable IRQ + FIRQ
 ; ORCC with IntsDisable to disable IRQ + FIRQ
 
-IntsEnable		EQU		~(FlagFIRQ+FlagIRQ)
+IntsEnable		EQU		$FF-(FlagFIRQ+FlagIRQ)
 IntsDisable		EQU		(FlagFIRQ+FlagIRQ)		
 
 AciaData	    EQU		RegAciaData+ACIA_BASE	; Acia Rx/Tx Register

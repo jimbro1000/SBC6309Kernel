@@ -1,6 +1,7 @@
     include "config.inc"
     include "cpu.inc"
     include "acia.inc"
+    include "constants.inc"
 
 ; *****************************************************************************
 ; * 6309 test ROM - intended to run on the SBC6309 with BAD VGA card          *
@@ -228,6 +229,7 @@ PRINT_BACKSPACE:
     STA     CURSOR_COL
     LDA     BACK_CHAR
     STA     ,-X
+NO_BACKSPACE:
     PULS    A,X,PC ;rts
 
 PUT_CR:
@@ -680,10 +682,3 @@ AciaData	    EQU		RegAciaData+ACIA_BASE	; Acia Rx/Tx Register
 AciaStat	    EQU		RegAciaStat+ACIA_BASE	; Acia status register
 AciaCmd		    EQU		RegAciaCmd+ACIA_BASE	; Acia command register
 AciaCtrl	    EQU		RegAciaCtrl+ACIA_BASE	; Acia control register
-
-CTL_C    EQU      'C'-$40                           ; control-C
-CTL_S    EQU      'S'-$40                           ; control-S
-CTL_H    EQU      'H'-$40                           ; control-H
-CTL_X    EQU      'X'-$40                           ; control-X
-DEL      EQU      127                               ; "Delete"
-ESC      EQU      '['-$40                           ; ESCape

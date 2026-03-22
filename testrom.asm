@@ -166,7 +166,6 @@ FORCE_MON:
     JSR     MONITOR             ; monitor drain buffer and process commands if complete
     BRA     MAIN_LOOP
 
-
 PUT_MSG:
     PSHS    X
     LDX     2,S
@@ -490,6 +489,69 @@ PUT_SERIAL_CHAR:
     BEQ     PUT_SERIAL_CHAR			    ; nop, loop until current byte transmitted
     STA     AciaData		            ; write data to be transmitted	
     PULS    CC,B,PC			            ; restore and return
+PUT_SERIAL_MSG:
+    PSHS    X
+    LDX     2,S
+    BSR     PUT_SERIAL_STRING
+    STX     2,S
+    PULS    X,PC ;rts
+;;
+;; PUTCR - output CRLF to CONSOLE channel
+;; return: all registers preserved
+;;
+PUT_SERIAL_CR:
+        PSHS     A                                 ; save A value
+PUTCR1  LDA      #CR                               ; output a carriage return
+        BSR      PUT_SERIAL_CHAR                   ;
+        LDA      #LF                               ; output a line feed
+        BSR      PUT_SERIAL_CHAR                   
+        PULS     A,PC                              ; restore A and PC and return
+;;
+;; PUT_SERIAL_STRING - output NULL/FF terminated string at X to CONSOLE channel
+;; terminate with either 0, or $FF (CRLF before terminates)
+;; inputs: X = address of string to output
+;; return: X = terminator byte of string+1
+;;
+PUT_SERIAL_STRING:
+        PSHS     A                                 ; preserve A
+PSS1    LDA      ,X+                               ; get char from message
+        BEQ      PSTRX                             ;  0 = end
+        CMPA     #$FF                              ; FF = newline end?
+        BEQ      PUTCR1                            ;  yes, new line, exit via PUTCR
+        JSR      PUT_SERIAL_CHAR                   ; output character to term
+        BRA      PSS1                              ; keep going
+PSTRX   PULS     A,PC                              ; restore A and return
+PUT_SERIAL_CONST:
+    PSHS    A,X
+    LDX     3,S
+    LDA     ,X+
+    BSR     PUT_SERIAL_CHAR
+    STX     3,S
+    PULS    A,X,PC ;rts
+PUT_SERIAL_BYTE:
+    PSHS    A
+    LSRA
+    LSRA
+    LSRA
+    LSRA
+    BSR     PUT_SERIAL_HEX
+    PULS    A
+; fall into PUT_HEX
+PUT_SERIAL_HEX:
+    PSHS    A
+    ANDA    #$0F            ; remove upper half
+    ADDA    #'0'            ; make prinable
+    CMPA    #'9'            ; check if in digit range
+    BLS     PH1             ;  yes - skip alpha adjustment
+    ADDA    #7              ; convert to alpha (10=A, etc.)
+PH1:
+    BSR     PUT_SERIAL_CHAR
+    PULS    A,PC ;rts
+PUT_SERIAL_SPACE:
+    PSHS    A
+    LDA     #$60
+    BSR     PUT_SERIAL_CHAR
+    PULS    A,PC ;rts
 
 DO_SET_BAUD:
 	CMPB    #$07			            ; check for a valid board rate number

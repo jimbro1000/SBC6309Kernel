@@ -1,0 +1,5 @@
+Types: deb deb-src
+URIs: http://www.6809.org.uk/debian/
+Suites: testing
+Components: main
+Signed-By: /etc/apt/keyrings/www.6809.org.uk.asc

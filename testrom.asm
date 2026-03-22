@@ -53,6 +53,10 @@ SCREEN_BLINK   EQU  $0058 ; screen blink counter reset - 1 byte
 BACK_CHAR      EQU  $0059 ; background character - 1 byte
 dMODE          EQU  $005A ; monitor mode - 1 byte
 dTEMP          EQU  $005B ; monitor temp - 1 byte
+dST            EQU  $005C ; monitor store index - 2 bytes
+dXAM           EQU  $005E ; monitor XAM index - 2 bytes
+MON_RAM        EQU  $0060 ; base of monitor RAM for command storage, etc.   
+                          ; 128 bytes
 
 ; *****************************************************************************
 ; * interrupt vector definitions                                              *
@@ -161,6 +165,45 @@ DRAIN_SERIAL:
 FORCE_MON:
     JSR     MONITOR             ; monitor drain buffer and process commands if complete
     BRA     MAIN_LOOP
+
+
+PUT_MSG:
+    PSHS    X
+    LDX     2,S
+    BSR     PRINT_STRING
+    STX     2,S
+    PULS    X,PC ;rts
+PUT_CONST:
+    PSHS    A,X
+    LDX     3,S
+    LDA     ,X+
+    BSR     PRINT_CHAR
+    STX     3,S
+    PULS    A,X,PC ;rts
+PUT_BYTE:
+    PSHS    A
+    LSRA
+    LSRA
+    LSRA
+    LSRA
+    BSR     PUT_HEX
+    PULS    A
+; fall into PUT_HEX
+PUT_HEX:
+    PSHS    A
+    ANDA    #$0F            ; remove upper half
+    ADDA    #'0'            ; make prinable
+    CMPA    #'9'            ; check if in digit range
+    BLS     PH0             ;  yes - skip alpha adjustment
+    ADDA    #7              ; convert to alpha (10=A, etc.)
+PH0:
+    BSR     PRINT_CHAR
+    PULS    A,PC ;rts
+PUT_SPACE:
+    PSHS    A
+    LDA     #$60
+    BSR     PRINT_CHAR
+    PULS    A,PC ;rts
 
 ; *********************************************************************
 ; * Copy null terminated string from address in X to screen at cursor *
@@ -634,6 +677,230 @@ MON_ADDDIGIT:
     INCB                    ; advance command index
     BRA     MON_NEXTHEX     ; get next hex digit
     RTS
+MON_RUN:
+    LEAS   2,S              ; drop return address from stack
+    JMP    [MON_XAM,U]      ; RUN command, jump to address in XAM index
+MON_XLOAD:
+    LDX    #HEX_DOWNLOAD_MSG
+    JSR    PRINT_STRING
+    JSR    DL_START         ; download hex file from host
+MON_XRET:
+    RTS
+
+; A non-hex, non-command character has been encountered. We may have a new
+; hex argument in WORD (if MON_TEMP = B, we do NOT) and if so, we need to figure
+; out what to do with depending on MODE. If we are already in STOR mode, then
+; we simply store the LSB of the WORD at address in ST, then increment ST.
+; If we are in XAM mode (which includes the address entered prior to the ':' in
+; the command line) then WORD argument is copied to XAM and ST addresses, and we
+; fall into the NXTPRT loop. If we're already in BLOCK XAM mode, then we take the
+; WORD argument as the end of the block, and fall in the NXTPRT loop.
+;
+; U is pointer to line buffer and work variables
+; X is work pointer
+; W is the WORD parsed from input line (A2 in new monitor)
+; B is the index into the line buffer
+; A is work register
+; MON_TEMP is copy of line buffer index upon entry, but after this is
+;          complete, it is the flow-control byte for XAM/BLOCK XAM output
+
+MON_NOTHEX:
+    CMPB     <dTEMP                             ; Check if W empty (no hex digits parsed).
+    BEQ      MON_XERR                           ;  yes, bad input so return via ERROR
+    CLR      <dTEMP                             ; clear the 'flow control' byte
+    TST      <dMODE                             ; Test MODE byte.
+    BPL      MON_NOTSTOR                        ; B7=1 for STOR, 0 for XAM and BLOCK XAM
+; STOR mode
+    LDX      <dST                               ; use X to hold 'store index'
+    STF      ,X+                                ; store LSB of WORD at 'store index'
+    STX      <dST                               ; save the incremented 'store index'
+    BRA      MON_NEXT_ITEM                      ; Get next command item.
+MON_NOTSTOR:
+    BNE      MON_XAMNEXT                        ; mode = $00 for XAM, $56 for BLOCK XAM.
+; non BLOCK XAM
+    STW      <dST                               ; copy word parsed into 'store index'
+    STW      <dXAM                              ; copy word parsed into 'XAM index'
+    CLRA                                        ; set Z=1 to cause address display to occur
+; fall into NXTPRNT loop...
+MON_NXTPRNT:
+    BNE      MON_PRDATA                         ; Z=0 means skip displaying address
+    LDA      <dTEMP                             ; check flow control byte
+    BEQ      MON_NXT1                           ;  if zero, skip waiting for character
+    JSR      GETCHT                             ; yes, flow control in effect, wait for character
+    CMPA     #CTL_X                             ; did we get a ^X?
+    BEQ      MON_XRET                           ;  yes, exit and get new input line
+    CMPA     #SPACE                             ; did we get a SPACE
+    BEQ      MON_NXT1                           ;  yes, set flow control to $20
+    CLRA                                        ; any other character, clear flow control
+MON_NXT1:
+    STA      <dTEMP                             ; update flow control byte
+    JSR      GETCH1                             ; attempt to read a character (A=0 if none)
+    CMPA     #SPACE                             ; is it a SPACE?
+    BEQ      MON_NXT2                           ;   yes, set flow control to $20
+    CMPA     #CTL_X                             ; is it a ^X?
+    BEQ      MON_XRET                           ;  yes, exit and get new input line
+    LDA      <dTEMP                             ; flow unaffected by other characters
+MON_NXT2:
+    STA      <dTEMP                             ; update flow control byte
+MON_NXT3:
+    JSR      PUT_CR                              ; CR for a new line
+    LDA      <dXAM                              ; 'XAM index' high-order byte.
+    JSR      PUT_BYTE
+    LDA      <dXAM+1                            ; Low-order 'Examine index' byte.
+    JSR      PUT_BYTE
+    LDA      #':'                               ; ":".
+    JSR      PRINT_CHAR                              ; Output it.
+MON_PRDATA:
+    JSR      PUT_SPACE                           ; output a space
+    LDA      [MON_XAM,U]                        ; Get data byte at 'examine index'.
+    JSR      PUT_BYTE                            ; display it
+MON_XAMNEXT:
+    LDX      <dXAM                              ; use X to hold XAM index
+    CMPR     W,X                                ; compare XAM index to parsed address WORD
+    LBEQ     MON_NEXT_ITEM                      ;  same, done examining memory
+    LEAX     1,X                                ; increment XAM index
+    STX      <dXAM                              ;  and save it
+    LDA      <(dXAM+1)                          ; Check low-order 'examine index' byte
+    ANDA     #$07                               ; set Z when 'examine index' MOD 8 = 0
+    BRA      MON_NXTPRNT                        ; always taken
+MON_XERR:
+    LDA      #'?'                               ; parse ERROR
+    JMP      PRINT_CHAR                              ; output a ? and return
+
+;;======================================================================
+;; S-RECORD AND INTEL HEX CONSOLE DOWNLOAD FUNCTION
+;;======================================================================
+
+;;
+;; DL_START - try to download a HEX file (either S9 or IHEX) from console
+;; inputs: none
+;; return: V=0 : successful load (A=0)
+;;         V=1 : error during load (A=$FF)
+;;
+DL_START:
+        BSR      DL_REC                            ; DOWNLOAD RECORD (A=00 ready for more)
+        BNE      DLO2                              ;  if Z=0 then stop reading records
+        JSR      PUT_CONST                         ; OUTPUT ONE DOT PER RECORD
+        FCC      '.'
+        BRA      DL_START                          ; CONTINUE
+DLO2    BPL      DLO3                              ;  if N=0, no error occurred (A=01 means EOF)
+        JSR      PUT_MSG
+        FCN      "ERR"
+        ORCC     #FlagOverflow                     ; set V (error)         
+        RTS
+DLO3    JSR      PUT_MSG
+        FCN      "OK"
+        RTS
+; Download a record in either MOTOROLA or INTEL hex format
+DL_REC  JSR      GETCH                             ; Get a character
+        CMPA     #CTL_X                            ; Check for ^X (CANCEL)
+        BEQ      DL_ERR                            ; yes, abort with error
+        CMPA     #':'                              ; Start of INTEL record?
+        LBEQ     DL_INT                            ; Yes, download INTEL
+        CMPA     #'S'                              ; Start of MOTOROLA record?
+        BNE      DL_REC                            ; No, keep looking
+; Download a record in MOTOROLA hex format
+DL_MOT  JSR      GETCH                              ; get record type
+        CMPA     #'0'                              ; S0 header record?
+        BEQ      DL_REC                            ;    skip it
+        CMPA     #'5'                              ; S5 count record?
+        BEQ      DL_REC                            ;    skip it
+        CMPA     #'9'                              ; S9 end of file?
+        BEQ      DL_MOT9                           ;    end of file
+        CMPA     #'1'                              ; should be a data record (S1) then!
+        BNE      DL_ERR                            ;  none of these = load error
+        JSR      GETBYTE                           ; get length
+        BVS      DL_ERR                            ; report error
+        TFR      A,E                               ; start checksum in E
+        SUBA     #3                                ; adjust length (omit address and checksum)
+        TFR      A,F                               ; set length in F
+; Get address         
+        JSR      GETBYTE                           ; get first byte of address
+        BVS      DL_ERR                            ; report error
+        TFR      A,B                               ; save for later
+        ADDR     A,E                               ; include in checksum
+        JSR      GETBYTE                           ; get next byte of address
+        BVS      DL_ERR                            ; report error
+        EXG      A,B                               ; swap address halves (endian stuff)
+        TFR      D,X                               ; set pointer
+        ADDR     B,E                               ; include in checksum
+; Get data bytes         
+        BSR      DL_BYTES
+        BVS      DL_ERR
+; get checksum byte
+        JSR      GETBYTE                           
+        BVS      DL_ERR                            ; report error
+        ADDR     A,E                               ; add to computed checksum
+        INCE                                       ; test for success
+        BEQ      DL_RTS                            ; download ok
+
+; Error occurred on loading
+DL_ERR  LDA      #$FF                              ; A=$FF if an error occurred (N is set, Z is clear)
+        RTS
+
+; properly handle S9 end record (just eat it)
+DL_MOT9 JSR      GETBYTE                           ; get length byte
+        BVS      DL_ERR                            ; report error
+        TFR      A,F                               ; save length
+DL_MOT10:
+        JSR      GETBYTE                           ; get next byte (ignore it)
+        DECF                                       ; reduce length
+        BNE      DL_MOT10                          ; get all the bytes
+; fall into DLEOF...
+
+; Record download successful, EOF marker encountered
+DL_EOF  LDA      #$01                              ; A=$01 if EOF is reached (N and Z both clear)
+        RTS
+
+; Record download successful, expecting another record
+DL_RTS  CLRA                                       ; A=$00 if another record is needed (Z set, N clear)
+        RTS
+
+; Download F number of bytes from console, storing in memory at X, and 
+; maintaining running checksum in E. Exit with V=1 on error.
+DL_BYTES:
+        TSTF                                       ; examine # of bytes to get
+        BEQ      DLBX                             ;   zero, nothing to do!
+        JSR      GETBYTE                           ; get data byte
+        BVS      DLBX                             ; exit with V=1 on error
+        STA      ,X+                               ; Write to memory
+        ADDR     A,E                               ; include in checksum
+        DECF                                       ; reduce length
+        BNE      DL_BYTES                          ; Do them all
+DLBX    RTS
+
+; Download record in INTEL format
+DL_INT  JSR      GETBYTE                           ; get count
+        BVS      DL_ERR                            ; report error
+        TFR      A,E                               ; start checksum in E
+        TFR      A,F                               ; set length in F
+; Get address
+        JSR      GETBYTE                           ; get first byte of address
+        BVS      DL_ERR                            ; report error
+        TFR      A,B                               ; Save for later
+        ADDR     A,E                               ; include in checksum
+        JSR      GETBYTE                           ; get next byte of address
+        BVS      DL_ERR                            ; report error
+        EXG      A,B                               ; Swap
+        TFR      D,X                               ; Set pointer
+        ADDR     B,E                               ; include in checksum
+; Get record type
+        INCF                                       ; temporarily increment length (EOF 0->1)
+        JSR      GETBYTE                           ; get type value
+        BVS      DL_ERR                            ; report error
+        CMPA     #1                                ; EOF record?
+        BEQ      DL_MOT10                          ;   yes, eat 1 byte and return with EOF status
+        ADDR     A,E                               ; include type in checksum
+        DECF                                       ; back to correct length 
+; Get data bytes
+        BSR      DL_BYTES                          ; get F# of data bytes (return with zero length)
+        BVS      DL_ERR                            ; report error
+; Get checksum
+        JSR      GETBYTE                           ; Read checksum byte
+        BVS      DL_ERR                            ; Report error
+        ADDR     A,E                               ; add to computed checksum
+        BEQ      DL_RTS                            ; Report success
+        BRA      DL_ERR                            ; Report failure
 
 ERROR_VECTOR:
     RTI
@@ -660,6 +927,9 @@ COLD_MESSAGE3:
     FCN "BOOTSTRAP ONLY"              ; Additional info
 MSG_6309:
     FCN "6309 NOT DETECTED - HALTING" ; 6309 not detected message
+HEX_DOWNLOAD_MSG:
+    FCB    CR,LF
+    FCN    "Hex Download "
 
     ORG $FFF0
 VECTOR_TABLE:

@@ -657,7 +657,7 @@ POP_KBD_BUFF_END:
 
 ; **************************************************************
 ; * Monitor loosly based on wozmon translated to 6809 assembly *
-; * Implementation is incomplete....
+; * Implementation is incomplete....                           *
 ; **************************************************************
 
 MONITOR:

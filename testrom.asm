@@ -59,6 +59,16 @@ MON_RAM        EQU  $0060 ; base of monitor RAM for command storage, etc.
                           ; 128 bytes
 
 ; *****************************************************************************
+; * Select display library to use                                             *
+; * 0 = NULL display library (for testing without display hardware)           *
+; * 1 = BAD VGA display library (requires BAD VGA card)                       * 
+; * 2 = System 2 display library (requires System 2 card)                     *
+; * anything else will use serial console isntead of display hardware         *
+; *****************************************************************************
+
+DISPLAY_LIB    EQU 1    ; use BAD VGA display library
+
+; *****************************************************************************
 ; * interrupt vector definitions                                              *
 ; *****************************************************************************
 
@@ -70,9 +80,6 @@ FIRQ_HANDLER   EQU  $010C ; FIRQ handler vector
 SWI2_HANDLER   EQU  $010F ; SWI2 handler vector
 SWI3_HANDLER   EQU  $0112 ; SWI3 handler vector
 
-; default constants for BAD VGA operation
-SCREEN_COLS_BAD    EQU  50    ; number of columns on screen using BAD vga
-SCREEN_ROWS_BAD    EQU  18    ; number of rows on screen using BAD vga
 
     ORG     ROM_BASE
 RESET_HANDLER:
@@ -204,57 +211,18 @@ PUT_SPACE:
     BSR     PRINT_CHAR
     PULS    A,PC ;rts
 
-; *********************************************************************
-; * Copy null terminated string from address in X to screen at cursor *
-; * INPUT : vector to string in X                                     *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-PRINT_STRING:               ; copy string from X to cursor
-    PSHS    A,B,Y
-    LDY     CURSOR_POS      ; get current cursor address
-    LDB     CURSOR_COL      ; get current cursor column
-COPY_LOOP_LN:
-    LDA     ,X+
-    BEQ     COPY_DONE
-    STA     ,Y+
-    INCB
-    CMPB    #SCREEN_COLS
-    BNE     COPY_LOOP_LN
-    CLRB
-    LDA     CURSOR_ROW
-    INCA
-    CMPA    #SCREEN_ROWS
-    BNE     NO_SCROLL
-    DECA
-    JSR     SCROLL_UP
-NO_SCROLL:
-    STA     CURSOR_ROW
-    BRA     COPY_LOOP_LN
-COPY_DONE:
-    STY     CURSOR_POS 
-    PULS    A,B,Y,PC ;rts
-
-PRINT_CHAR:
-    PSHS    A,X
-    LDX     CURSOR_POS
-    STA     ,X+
-    LDA     CURSOR_COL
-    CMPA    #SCREEN_COLS
-    BNE     NO_SCROLL_CHAR
-    CLR     CURSOR_COL
-    LDA     CURSOR_ROW
-    INCA
-    CMPA    #SCREEN_ROWS
-    BNE     NO_SCROLL_CHAR
-    DECA
-    STA     CURSOR_ROW
-    LDA     #SCREEN_COLS
-    NEGA
-    LEAX    A,X
-    JSR     SCROLL_UP
-NO_SCROLL_CHAR:
-    STX     CURSOR_POS
-    PULS    A,X,PC ;rts
+; **************************************************************
+; * Inject display library here
+; **************************************************************
+    IF DISPLAY_LIB == 0
+        include "nulldisplay.asm"
+    ELSIF DISPLAY_LIB == 1
+        include "bvgadisplay.asm"
+    ELSIF DISPLAY_LIB == 2
+        include "nulldisplay.asm"
+    ELSE
+        include "nulldisplay.asm"
+    ENDIF
 
 BACKSPACE:
     PSHS    A,X
@@ -273,55 +241,6 @@ PRINT_BACKSPACE:
     STA     ,-X
 NO_BACKSPACE:
     PULS    A,X,PC ;rts
-
-PUT_CR:
-    PSHS    A,B,Y
-    CLR     CURSOR_COL
-    LDA     CURSOR_ROW
-    INCA
-    CMPA    #SCREEN_ROWS
-    BNE     NO_SCROLL_CR
-    DECA
-    JSR     SCROLL_UP
-NO_SCROLL_CR:
-    STA     CURSOR_ROW
-    LDB     #SCREEN_COLS
-    MUL
-    LDY     #SCREEN_TOP
-    LEAY    D,Y
-    STY     CURSOR_POS
-    PULS    A,B,Y,PC ;rts
-
-; *********************************************************************
-; * Scroll screen up by one row                                       *
-; * INPUT : none                                                      *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-SCROLL_UP: ; scroll screen up by one row
-    PSHS    A,X,Y
-    LDX     SCREEN_TOP
-    LDY     SCREEN_TOP
-    LDA     #SCREEN_COLS
-    LEAX    A,X ; offset X with one row
-SCROLL_UP_LOOP:
-    LDA     ,X+
-    STA     ,Y+
-    CMPY    SCREEN_END
-    BNE     SCROLL_UP_LOOP
-
-; *********************************************************************
-; * Clear last line of screen                                         *
-; * INPUT : none                                                      *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-BLANK_LINE:
-    LDA     #$20
-    LDX     #SCREEN_COLS
-BLANK_LINE_LOOP:
-    STA     ,Y+
-    LEAX    -1,X
-    BNE     BLANK_LINE_LOOP
-    PULS    A,X,Y,PC ;rts
 
 ; *********************************************************************
 ; * Test if CPU is a 6309                                             *
@@ -348,98 +267,6 @@ HALT_6809:
     BRA     HALT_6809
 IS_6309:
     PULS    D,PC
-
-; *********************************************************************
-; * Clear screen memory and reset cursor position                     *
-; * Default version uses background character stored in BACK_CHAR     *
-; * INPUT : background character in A (typically blank space)         *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-DEFAULT_CLS:
-    PSHS    A
-    LDA     BACK_CHAR
-    JSR     CLS
-    PULS    A,PC ;rts
-CLS:
-    PSHS    B,X
-    LDX     SCREEN_TOP                  ; get screen top address
-    TFR     A,B                         ; copy background char to B
-CLS_LOOP:
-    STD     ,X++                        ; clear screen memory
-    CMPX    SCREEN_END                  ; check for end of screen
-    BNE     CLS_LOOP                    ; loop until done
-    CLR     CURSOR_COL                  ; reset cursor column
-    CLR     CURSOR_ROW                  ; reset cursor row
-    LDX     SCREEN_TOP                  ; reset cursor position
-    STX     CURSOR_POS                  ; store cursor position
-    PULS    B,X,PC ;rts
-
-; *********************************************************************
-; * Initialize display parameters for BAD VGA                         *
-; * INPUT : none                                                      *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-INIT_DISPLAY:
-    PSHS    A,B
-    LDD     #SCREEN_BASE_BAD            ; get screen base address for BAD VGA
-    STD     SCREEN_TOP                  ; store in screen top
-    LDD     #SCREEN_END_BAD             ; get screen end address for BAD VGA
-    STD     SCREEN_END                  ; store in screen end
-    LDD     #SCREEN_SIZE_BAD            ; get screen size for BAD VGA
-    STD     SCREEN_SIZE                 ; store in screen size
-    LDA     #SCREEN_COLS_BAD            ; get number of columns for BAD VGA
-    STA     SCREEN_COLS                 ; store in screen cols
-    LDA     #SCREEN_ROWS_BAD            ; get number of rows for BAD VGA
-    STA     SCREEN_ROWS                 ; store in screen rows
-    LDA     #BAD_CURSOR_CHAR            ; get cursor character for BAD VGA
-    STA     CURSOR                      ; store in cursor
-    LDA     #BAD_CURSOR_FLASH           ; get cursor blink rate for BAD VGA
-    STA     SCREEN_BLINK                ; store in screen blink counter reset
-    LDA     #BAD_BACK_CHAR              ; get background character for BAD VGA
-    STA     BACK_CHAR                   ; store in background character
-    PULS    A,B,PC ;rts
-
-SET_DISPLAY_BASE:
-    STD     SCREEN_TOP                  ; set screen base address
-    LDX     SCREEN_SIZE                 ; get screen size
-    LEAX    D,X                         ; calculate screen end address
-    STX     SCREEN_END                  ; store screen end address
-    RTS
-SET_CURSOR:
-    PSHS    X
-    LDX     CURSOR_POS                  ; get current cursor position
-    STD     CURSOR_ROW                  ; set cursor position (row,col first)
-    PSHS    B
-    LDB     SCREEN_COLS
-    MUL                                 ; multiply row by columns
-    LEAX    D,X                         ; add offset to base address
-    PULS    B
-    ABX                                 ; add column offset
-    STX     CURSOR_POS                  ; store new cursor position
-    PULS    X,PC ;rts
-
-; *********************************************************************
-; * Handle cursor blink processing                                    *
-; * INPUT : none                                                      *
-; * OUTPUT : none                                                     *
-; *********************************************************************
-BLINK:
-    PSHS    A
-    DEC     CURSOR_COUNTER              ; decrement blink counter
-    BNE     NO_BLINK                    ; if not zero, skip blink processing
-    LDA     SCREEN_BLINK                ; reload blink counter
-    STA     CURSOR_COUNTER
-    LDA     [CURSOR_POS]                ; get current cursor character
-    CMPA    CURSOR                      ; compare to normal cursor char
-    BNE     BLINK_ON                    ; if not equal, turn on blink
-    LDA     CURSOR                      ; get normal cursor char
-    STA     [CURSOR_POS]                ; restore normal cursor
-    BRA     NO_BLINK                    ; done
-BLINK_ON:
-    LDA     #$20                        ; get space character
-    STA     [CURSOR_POS]                ; turn on blink (hide cursor)
-NO_BLINK:
-    PULS    A,PC ;rts
 
 ; *********************************************************************
 ; * Receive a byte from the serial port via ACIA                      *
